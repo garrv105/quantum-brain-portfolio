@@ -228,10 +228,12 @@
       <ul>${data.items.map(i => `<li>${i}</li>`).join('')}</ul>
     `;
     panel.classList.remove('hidden');
+    window.QuantumAudio?.panelOpen();
   }
 
   document.getElementById('zone-panel-close')?.addEventListener('click', () => {
     document.getElementById('zone-panel')?.classList.add('hidden');
+    window.QuantumAudio?.panelClose();
   });
 
   // ── Camera drift ──────────────────────────
@@ -312,6 +314,7 @@
         hoveredNode.mesh.material.color.setHex(0xffffff);
         hoveredNode.mesh.scale.setScalar(2.2);
         canvas.style.cursor = 'pointer';
+        window.QuantumAudio?.nodeHover();
       }
     } else {
       if (hoveredNode) {
