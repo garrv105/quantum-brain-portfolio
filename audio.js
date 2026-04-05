@@ -9,10 +9,8 @@
 
   let ctx = null;
   let masterGain = null;
-  let ambientGain = null;
   let sfxGain = null;
   let initialized = false;
-  let ambientStarted = false;
   let muted = false;
 
   // ── Reverb impulse (short, smooth) ────────
@@ -37,181 +35,23 @@
     try {
       ctx = new (window.AudioContext || window.webkitAudioContext)();
 
-      // Master — gentle fade-in over 3s
+      // Master
       masterGain = ctx.createGain();
-      masterGain.gain.setValueAtTime(0, ctx.currentTime);
-      masterGain.gain.linearRampToValueAtTime(0.55, ctx.currentTime + 3);
+      masterGain.gain.value = 0.55;
       masterGain.connect(ctx.destination);
 
-      // Ambient bus (quiet)
-      ambientGain = ctx.createGain();
-      ambientGain.gain.value = 0.28;
-      ambientGain.connect(masterGain);
-
-      // SFX bus (very soft)
+      // SFX bus
       sfxGain = ctx.createGain();
       sfxGain.gain.value = 0.22;
       sfxGain.connect(masterGain);
 
-      startAmbient();
+      // No ambient — SFX only
       buildToggle();
     } catch (e) {
       console.warn('Web Audio not supported:', e);
     }
   }
 
-  // ── AMBIENT ENGINE ────────────────────────
-  // Philosophy: pure sine tones in a musical key (A minor pentatonic),
-  // heavy reverb, slow LFO — like a far-away cello + synth pad.
-  function startAmbient() {
-    if (ambientStarted) return;
-    ambientStarted = true;
-    const now = ctx.currentTime;
-
-    // Shared reverb for the ambient bus
-    const rev = makeReverb(2.8, 3.5);
-    const revGain = ctx.createGain();
-    revGain.gain.value = 0.55;
-    rev.connect(revGain);
-    revGain.connect(masterGain);
-
-    // Route ambient bus also through reverb
-    ambientGain.connect(rev);
-
-    // ── Layer 1: Root pad (A2 = 110 Hz, pure sine, very soft) ──
-    spawnPad(110,  0.10, now,       rev);
-    spawnPad(165,  0.07, now + 1.2, rev); // E3
-    spawnPad(220,  0.05, now + 2.1, rev); // A3
-    spawnPad(330,  0.04, now + 3.0, rev); // E4
-
-    // ── Layer 2: Slow breathing LFO on master volume ──
-    const breathLFO = ctx.createOscillator();
-    const breathG   = ctx.createGain();
-    breathLFO.type = 'sine';
-    breathLFO.frequency.value = 0.045; // ~22-second cycle
-    breathG.gain.value = 0.06;
-    breathLFO.connect(breathG);
-    breathG.connect(ambientGain.gain);
-    breathLFO.start(now);
-
-    // ── Layer 3: Subtle quantum pulse every 6–11s ──
-    scheduleQuantumPulse(rev);
-
-    // ── Layer 4: Very occasional deep resonance bloom ──
-    scheduleBloom(rev);
-  }
-
-  function spawnPad(freq, vol, startTime) {
-    // Two sine oscillators slightly detuned — creates gentle beating, no harshness
-    [-2, 2].forEach(cents => {
-      const osc  = ctx.createOscillator();
-      const gain = ctx.createGain();
-      const lpf  = ctx.createBiquadFilter();
-
-      osc.type = 'sine';
-      osc.frequency.value = freq;
-      osc.detune.value = cents;
-
-      // Soft low-pass — removes any upper partials
-      lpf.type = 'lowpass';
-      lpf.frequency.value = freq * 3.2;
-      lpf.Q.value = 0.5;
-
-      // Slow tremolo — barely audible
-      const trem  = ctx.createOscillator();
-      const tremG = ctx.createGain();
-      trem.type = 'sine';
-      trem.frequency.value = 0.08 + Math.random() * 0.06;
-      tremG.gain.value = vol * 0.15;
-      trem.connect(tremG);
-      tremG.connect(gain.gain);
-      trem.start(startTime);
-
-      gain.gain.value = vol;
-
-      osc.connect(lpf);
-      lpf.connect(gain);
-      gain.connect(ambientGain);
-      osc.start(startTime);
-    });
-  }
-
-  function scheduleQuantumPulse(rev) {
-    const delay = 6000 + Math.random() * 5000;
-    setTimeout(() => {
-      if (!muted && ctx) playQuantumPulse(rev);
-      scheduleQuantumPulse(rev);
-    }, delay);
-  }
-
-  function playQuantumPulse(rev) {
-    // A single, very soft sine tone in the musical key — fades in/out slowly
-    const now = ctx.currentTime;
-    // Notes from A minor pentatonic: A3, C4, D4, E4, G4
-    const notes = [220, 261.63, 293.66, 329.63, 392];
-    const freq  = notes[Math.floor(Math.random() * notes.length)];
-
-    const osc   = ctx.createOscillator();
-    const gain  = ctx.createGain();
-    const lpf   = ctx.createBiquadFilter();
-
-    osc.type = 'sine';
-    osc.frequency.value = freq;
-
-    lpf.type = 'lowpass';
-    lpf.frequency.value = 800;
-    lpf.Q.value = 0.4;
-
-    gain.gain.setValueAtTime(0, now);
-    gain.gain.linearRampToValueAtTime(0.06, now + 0.8);
-    gain.gain.setValueAtTime(0.06, now + 1.6);
-    gain.gain.linearRampToValueAtTime(0, now + 3.5);
-
-    osc.connect(lpf);
-    lpf.connect(gain);
-    gain.connect(ambientGain);
-    if (rev) gain.connect(rev);
-    osc.start(now);
-    osc.stop(now + 3.6);
-  }
-
-  function scheduleBloom(rev) {
-    const delay = 14000 + Math.random() * 16000;
-    setTimeout(() => {
-      if (!muted && ctx) playBloom(rev);
-      scheduleBloom(rev);
-    }, delay);
-  }
-
-  function playBloom(rev) {
-    // A gentle low chord swell — like a cello section far away
-    const now   = ctx.currentTime;
-    const roots = [82.41, 110, 130.81]; // E2, A2, C3
-    roots.forEach((freq, i) => {
-      const osc  = ctx.createOscillator();
-      const gain = ctx.createGain();
-      const lpf  = ctx.createBiquadFilter();
-
-      osc.type = 'sine';
-      osc.frequency.value = freq;
-
-      lpf.type = 'lowpass';
-      lpf.frequency.value = 400;
-      lpf.Q.value = 0.3;
-
-      gain.gain.setValueAtTime(0, now + i * 0.3);
-      gain.gain.linearRampToValueAtTime(0.07, now + i * 0.3 + 1.5);
-      gain.gain.setValueAtTime(0.07, now + i * 0.3 + 3);
-      gain.gain.linearRampToValueAtTime(0, now + i * 0.3 + 6);
-
-      osc.connect(lpf);
-      lpf.connect(gain);
-      gain.connect(ambientGain);
-      if (rev) gain.connect(rev);
-      osc.start(now + i * 0.3);
-      osc.stop(now + i * 0.3 + 6.5);
-    });
-  }
 
   // ── SFX LIBRARY — all very soft, musical ──
 
@@ -423,26 +263,18 @@
 
   // ── ATTACH TO DOM ─────────────────────────
   function attachListeners() {
-    // Nav links
+    // Nav links — click only
     document.querySelectorAll('.nav-link').forEach(el => {
-      el.addEventListener('mouseenter', sfxHover);
       el.addEventListener('click', sfxNav);
     });
 
-    // Buttons (not the toggle itself)
+    // Buttons — click only
     document.querySelectorAll('button:not(#audio-toggle)').forEach(el => {
-      el.addEventListener('mouseenter', sfxHover);
       el.addEventListener('click', sfxClick);
     });
 
-    // Anchor tags
-    document.querySelectorAll('a').forEach(el => {
-      el.addEventListener('mouseenter', sfxHover);
-    });
-
-    // Zone labels
+    // Zone labels — click only
     document.querySelectorAll('.zone-label').forEach(el => {
-      el.addEventListener('mouseenter', sfxHover);
       el.addEventListener('click', sfxPanelOpen);
     });
 
@@ -454,13 +286,12 @@
     const sendBtn = document.getElementById('terminal-send');
     if (sendBtn) sendBtn.addEventListener('click', sfxTerminalSend);
 
-    // Project / glass card hover
-    document.querySelectorAll('.proj-holo, .glass-card').forEach(el => {
-      el.addEventListener('mouseenter', sfxHover);
-    });
+    // Brain canvas click (profile open)
+    const brainCanvas = document.getElementById('brain-canvas');
+    if (brainCanvas) brainCanvas.addEventListener('click', sfxClick);
 
     // Expose for brain.js
-    window.__sfxNodeHover = sfxNodeHover;
+    window.__sfxNodeHover = () => {}; // disabled
     window.__sfxClick     = sfxClick;
     window.__sfxPanelOpen = sfxPanelOpen;
   }
